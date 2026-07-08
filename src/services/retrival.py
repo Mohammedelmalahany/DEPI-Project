@@ -1,0 +1,81 @@
+from functools import lru_cache
+from typing import Any, Dict, List, Optional
+from sentence_transformers import SentenceTransformer
+from qdrant_client import models
+from src.config import settings
+from src.infrastructure.qdrant.vectorstore import QdrantDBProvider
+
+@lru_cache(maxsize=1)
+def _embedder() -> SentenceTransformer:
+    # Lazily construct and cache the sentence transformer model.
+    return SentenceTransformer(settings.huggingface.model_name)
+
+
+def retrieve(
+    query: str,
+    top_k: int = 5,
+    disease_name: Optional[str] = None,
+    plant: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    # Embed query text and search Qdrant for matching contexts.
+    if not query or not query.strip():
+        raise ValueError("query is required")
+
+    provider = QdrantDBProvider(url=settings.qdrant.url, api_key=settings.qdrant.api_key)
+    provider.connect()
+
+    try:
+        dense_vector = _embedder().encode(
+            [query],
+            normalize_embeddings=True,
+            convert_to_numpy=True,
+        )[0].tolist()
+
+        conditions = []
+        if disease_name:
+            conditions.append(
+                models.FieldCondition(
+                    key="metadata.disease_name",
+                    match=models.MatchValue(value=disease_name),
+                )
+            )
+        if plant:
+            conditions.append(
+                models.FieldCondition(
+                    key="metadata.plant",
+                    match=models.MatchValue(value=plant),
+                )
+            )
+
+        query_filter = models.Filter(must=conditions) if conditions else None
+
+        if disease_name or plant:
+            provider.ensure_payload_indexes(settings.qdrant.collection_name)
+
+        points = provider.hybrid_search(
+            collection_name=settings.qdrant.collection_name,
+            query_text=query,
+            dense_vector=dense_vector,
+            limit=top_k,
+            query_filter=query_filter,
+        )
+
+        results = []
+        seen_texts = set()
+        for point in points:
+            payload = getattr(point, "payload", {}) or {}
+            text = str(payload.get("text", "")).strip()
+            if not text or text in seen_texts:
+                continue
+            seen_texts.add(text)
+            metadata = payload.get("metadata", {}) or {}
+            score = float(getattr(point, "score", 0.0) or 0.0)
+            results.append({
+                "text": text,
+                "metadata": metadata,
+                "score": score,
+            })
+
+        return results[:top_k]
+    finally:
+        provider.disconnect()

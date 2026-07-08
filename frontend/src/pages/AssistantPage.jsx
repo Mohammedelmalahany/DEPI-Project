@@ -1,85 +1,438 @@
-import { useState } from "react";
+import { useMemo, useRef, useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
+import { AnimatePresence, motion } from "framer-motion";
 import Layout from "../components/Layout";
 import PageTransition from "../components/PageTransition";
 import ChatBubble from "../components/ChatBubble";
-import Card from "../components/Card";
-import { imageUrls } from "../data/mockData";
-import { useI18n } from "../hooks/useI18n";
+import TypingIndicator from "../components/TypingIndicator";
+import { sendChatMessage } from "../utils/api";
+
+let nextId = 1;
+
+function parseModelClass(classStr) {
+  const parts = classStr.split("___");
+  if (parts.length !== 2) return null;
+  let plant = parts[0].replace(/_/g, " ").replace(/\s+/g, " ").trim();
+  const rawDisease = parts[1].replace(/_/g, " ").replace(/\s+/g, " ").trim();
+
+  const plantMap = {
+    "Corn (maize)": "Corn (Maize)",
+    "Pepper, bell": "Pepper (Bell)",
+    "Cherry (including sour)": "Cherry",
+  };
+  if (plantMap[plant]) plant = plantMap[plant];
+
+  const match = plants.find((p) => p.id.toLowerCase() === plant.toLowerCase());
+  if (match) plant = match.id;
+
+  return { plant, disease: rawDisease };
+}
+
+const plants = [
+  {
+    id: "Apple",
+    name: "Apple",
+    image:
+      "https://lh3.googleusercontent.com/aida-public/AB6AXuBS998xd4yi7pOEP_ZzjYvc1BeOYhFNyWlG2FocG-IZKZZXlwSDSBexsYNw4nV6IK-mzQZORadIyjgu6K94kF3BcFLhty2tpujqjyeFAPd8jkMzmV0IcxQ0mTr4Uupl3dTDSEjOXOgxARCFRGo8xjwS45RRsW3DKY4WGvKI6d_d5VyOb2OIkQOosF8JnxIssVsjkL_RCn-Ss02gClVjT6KcNXSsQBMFdHkGiXcuU45Y9Yihz3A01gZHW_VKNU0UlmF61Cdv0kJ4mN4",
+  },
+  {
+    id: "Cherry",
+    name: "Cherry",
+    image:
+      "https://lh3.googleusercontent.com/aida-public/AB6AXuBEucCUQFDWdAxffnPwOnUdE9LEmq2rrp0hsOA5GFb3L-ngTjHLiddSXa96oVS9ADpi4TCuwU7PFP6bjwJVdDmuAHavGk6ghXhCQT7n5M17bAjgb7zY-Ken50yIpl_SvqGxEQb0LKYp7TNrTjQ70TQX3KyHiBzeHMZ8FwuWtxFwBK9FsjkiOsPIJfSop2sY6NcxUQ4ausR1elZteYWWpIjzDwjDjxgitC05j3KkYXZYrhC3NPE03R2U2fQaQJ_tHLAKPfB6qLTgHHg",
+  },
+  {
+    id: "Corn (Maize)",
+    name: "Corn",
+    image:
+      "https://lh3.googleusercontent.com/aida-public/AB6AXuDWAyL7fnamuxcXA2NGXXwm4gtiO66ltihATn-Gmfymhr-GhIeBaH5yIw1f2IIJ7TjNQHFUdQPUUIDsvLGAh1_sPbYF9opJz3hTRKkeR9iLNvtPzIq5EKQgEqNyOxEcN18qkYoK2xg-VO4VHkSGtdm4Mu1hprV-MrflvqigD6xylfc5BIFzIzPVssa_-rbb3IaNHlUc2E6l-HqzNdKDJsExvOTDUWBWcwUysH9U0EprRY8Lnl_ay1ifxjVMyiqfcPupFR2JV0Dk5k4",
+  },
+  {
+    id: "Grape",
+    name: "Grape",
+    image:
+      "https://lh3.googleusercontent.com/aida-public/AB6AXuC-g4rq-DgX55hEhX-Y1w6DVUakMPmIpH6cpsMadCN4HGoyV02wQ-v4jecgCuCj3GCX8xXqD7xqZHz9ufgme0uCvPAFv_w8mV1IDz1pPDSW4nE97pgEkyaJ8eKzc_gddGz6DnF_MX5gSoBeN0tS_rZaLnMYljHMoZhtaXdUHKyEMPdrjFclYbbLa-llB87at-6vx6rRNYoVKQs_7FefkWMUA9u3kAsAlPGm5ZQ0VLk4lwjK4Ia4TIlKCXpVIdje_QXNgq4N5uO8Los",
+  },
+  {
+    id: "Orange",
+    name: "Orange",
+    image:
+      "https://lh3.googleusercontent.com/aida-public/AB6AXuBnaZR-i--I1EnewjDdcWVO8pAMGa9e2P3kZi0INrxi_lJ0TDfx0pwd0mJYEf6vJ11pSdicprkrMTdAoT6d0r_uvUtao2PQ9iuERZ1WGHZ24Nqc9MmoPJNMgiPlsimB_rebYFjboRRlwyEaAP9xZx2IfAEGH7s2DXbRcvkZ3bIah-e9P5X_IvGKalcj1sMhwmqXO7sotdhet1fX7OEGcaiXGE4vzgkhJDxD_guCiTekxtdbSDna04rz4LGS_JGPpBzlA7-SgX9K824",
+  },
+  {
+    id: "Peach",
+    name: "Peach",
+    image:
+      "https://lh3.googleusercontent.com/aida-public/AB6AXuCUZkVJbrECU4LZ4XsG5OY9v4Zaomh5B7UHyb9UrbyB7GQWI5AzytlWo4tXM3D33333iljxE3syxUjGZpkf0SrjIGvGUmLkwgGMdFooMN3WAEcEiwKfLO1KJxfEtCwKqRPaAWRnfCTPbcTOshqK_Un12ULqMnkf7KYjVi79JNiqkfmOJ_J8yTXfIEsZWLfQyx-gxGMpoNIQMenQU5Af5Wjkwqy-KKAwRnGJFe3qO-vyzPZ8TA1WBLPh1PWeMdTpU9BQRACHyQKlMJU",
+  },
+  {
+    id: "Pepper (Bell)",
+    name: "Pepper",
+    image:
+      "https://lh3.googleusercontent.com/aida-public/AB6AXuAjNpz6qjT3cZG247ouC-cnngyyvCGG3NzC1undqIHFgjRRw7qcTRBVI_ldo0I1rWxxAQw3YNNee-pke5oZG8jEszWxTwOXZBA2e7grTt6wnaqca12dR3rb5Hk0b61HSaf4pUjQMnbzsf9EPuYLHbp0EilcRT8J2BbXjcBUtHf2iXoauTa-t00n_s61_Q3FXvgP2TziWEeZ9c-Z-ZjjlZfwXX_NbyjsFcaweRAMDAPXkhjpGWhDSYo1iIvdaN_Su1rjWilHScr4kWg",
+  },
+  {
+    id: "Potato",
+    name: "Potato",
+    image:
+      "https://lh3.googleusercontent.com/aida-public/AB6AXuDqOWcUHD5Lf32H8ro97yaakoN9Xnjh6tvHR0R-9aqSfvHB1iPTLZaqbEu0ObJC6WR3De5XocXqTZHxchVBAd9PTksiW1bjaYxcHwGl5fsWPzikmu80zGCJeLHgYPvDCYJreVBV04OEk4HMR-GOfcunCtiy3Jm0krfuhySTETJ2XmQ4ZicseJ303hXxrxW1ffFkwmTfZvMX7XZrHjLw7MVyBzbexR2K2HMaJ4Pd4C3_2AMfervAKWTdroaUDULWz3bRgZ17z1isKJ0",
+  },
+  {
+    id: "Strawberry",
+    name: "Strawberry",
+    image:
+      "https://lh3.googleusercontent.com/aida-public/AB6AXuBXshpNPyJ2470kn2ofgqHKEx7AaP4wSTZZWaL-SBxvXJoYfzrbEuuKF1IlYKp4cfp3NNZVBTy52D3_9kO30B3pOHFh3B02dY-5_oideOVUOEyQUoNpOMKQN8SVfyhSH1a3N9jrSQMpsFNzPHAaY-K4wNTt8mh5wngyLULYOntWokxAGBY5pG-Ea3HlYlndsrzcz1ScbzIZOiIIuVn4la335y61nz3IBazGMR1TTVcwGz5P-s3lNzjNIm4axh-vI4DiYt9JvZ7ic6E",
+  },
+  {
+    id: "Tomato",
+    name: "Tomato",
+    image:
+      "https://lh3.googleusercontent.com/aida-public/AB6AXuC-MIJhjhk_xv3EBSjXBG-nxAwt3G9vLaThbqpW3ckKDq1tcs_xskaL-cA-MeyIkSIvck9yymg_0HXVQJ0DfZM4Cod8rO0LJmOoEzTNwdXlf182SKy8HHtodOZySGGRP6dr1r-FlclPT1Tir4U1becXmtmi57d-4xXxL43oEgdQJn7iEIAiLCAGwQF8b1W-7T4L_7ubhzHeo2gQ1WsXSq-718gDvknWa0aePri4XE6Rm43YfeKU3FcR8F7OBIJEMSUBmmsuewnP4c0",
+  },
+];
+
+const diseasesByPlant = {
+  Apple: [
+    { id: "Apple Scab - Apple", name: "Apple Scab" },
+    { id: "Black Rot - Apple", name: "Black Rot" },
+    { id: "Cedar Apple Rust - Apple", name: "Cedar Apple Rust" },
+  ],
+  Blueberry: [],
+  Cherry: [{ id: "Powdery Mildew - Cherry", name: "Powdery Mildew" }],
+  "Corn (Maize)": [
+    { id: "Gray Leaf Spot - Corn", name: "Gray Leaf Spot" },
+    { id: "Common Rust - Corn", name: "Common Rust" },
+    { id: "Northern Leaf Blight - Corn", name: "Northern Leaf Blight" },
+  ],
+  Grape: [
+    { id: "Black Rot - Grape", name: "Black Rot" },
+    { id: "Esca (Black Measles) - Grape", name: "Esca (Black Measles)" },
+    { id: "Isariopsis Leaf Blight - Grape", name: "Isariopsis Leaf Blight" },
+  ],
+  Orange: [
+    {
+      id: "Huanglongbing / Citrus Greening - Orange",
+      name: "Huanglongbing (Citrus Greening)",
+    },
+  ],
+  Peach: [{ id: "Bacterial Spot - Peach", name: "Bacterial Spot" }],
+  "Pepper (Bell)": [
+    { id: "Bacterial Spot - Pepper", name: "Bacterial Spot" },
+  ],
+  Potato: [
+    { id: "Early Blight - Potato", name: "Early Blight" },
+    { id: "Late Blight - Potato", name: "Late Blight" },
+  ],
+  Strawberry: [{ id: "Leaf Scorch - Strawberry", name: "Leaf Scorch" }],
+  Tomato: [
+    { id: "Bacterial Spot - Tomato", name: "Bacterial Spot" },
+    { id: "Early Blight - Tomato", name: "Early Blight" },
+    { id: "Late Blight - Tomato", name: "Late Blight" },
+    { id: "Leaf Mold - Tomato", name: "Leaf Mold" },
+    { id: "Septoria Leaf Spot - Tomato", name: "Septoria Leaf Spot" },
+    { id: "Spider Mites - Tomato", name: "Spider Mites" },
+    { id: "Target Spot - Tomato", name: "Target Spot" },
+    { id: "Tomato Yellow Leaf Curl Virus - Tomato", name: "Tomato Yellow Leaf Curl Virus" },
+    { id: "Tomato Mosaic Virus - Tomato", name: "Tomato Mosaic Virus" },
+  ],
+};
+
+function matchDiseaseId(plantId, rawDisease) {
+  const diseases = diseasesByPlant[plantId];
+  if (!diseases) return null;
+  const rawLower = rawDisease.toLowerCase();
+  for (const d of diseases) {
+    if (d.name.toLowerCase() === rawLower || d.name.toLowerCase().includes(rawLower) || rawLower.includes(d.name.toLowerCase())) {
+      return d.id;
+    }
+  }
+  return null;
+}
 
 export default function AssistantPage() {
-  const { t, lang } = useI18n();
+  const location = useLocation();
+  const initialDisease = location.state?.disease;
+
+  const parsed = useMemo(() => {
+    if (!initialDisease) return null;
+    return parseModelClass(initialDisease);
+  }, [initialDisease]);
+
+  const [selectedPlant, setSelectedPlant] = useState(parsed?.plant || null);
+  const [selectedDisease, setSelectedDisease] = useState(
+    parsed ? matchDiseaseId(parsed.plant, parsed.disease) : null
+  );
   const [draft, setDraft] = useState("");
-  const messages = [];
+  const [messages, setMessages] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const scrollRef = useRef(null);
+
+  const step = selectedPlant ? (selectedDisease ? "chat" : "diseases") : "plants";
+
+  const diseaseList = useMemo(() => {
+    if (!selectedPlant) return [];
+    return diseasesByPlant[selectedPlant] || [];
+  }, [selectedPlant]);
+
+  const selectedPlantData = useMemo(() => {
+    if (!selectedPlant) return null;
+    return plants.find((plant) => plant.id === selectedPlant) || null;
+  }, [selectedPlant]);
+
+  const selectedPlantImage = selectedPlantData?.image || "";
+  const selectedPlantLabel = selectedPlantData?.name || selectedPlant;
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+  }, [messages, loading]);
+
+  const selectedDiseaseLabel = useMemo(() => {
+    if (!selectedDisease || !selectedPlant) return "";
+    const options = diseasesByPlant[selectedPlant] || [];
+    const match = options.find((item) => item.id === selectedDisease);
+    return match?.name || selectedDisease;
+  }, [selectedDisease, selectedPlant]);
+
+  useEffect(() => {
+    if (!selectedDisease || !selectedPlant) return;
+    const intro = {
+      id: nextId++,
+      role: "ai",
+      time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      text: `Ask me anything about ${selectedDiseaseLabel} on ${selectedPlantLabel}. I can explain spread, risk, and treatment options.`,
+      animate: true,
+    };
+    setMessages([intro]);
+  }, [selectedDisease, selectedPlant, selectedDiseaseLabel]);
+
+  const handleSend = async () => {
+    const question = draft.trim();
+    if (!question || loading) return;
+
+    const userMsg = {
+      id: nextId++,
+      role: "user",
+      time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      text: question,
+    };
+
+    setMessages((prev) => [...prev, userMsg]);
+    setDraft("");
+    setLoading(true);
+
+    try {
+      const data = await sendChatMessage(
+        question,
+        5,
+        null,
+        selectedDisease,
+        selectedPlantLabel,
+      );
+
+      const aiMsg = {
+        id: nextId++,
+        role: "ai",
+        time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        text: data.answer || "I couldn't generate a response.",
+        warning: data.retrieval_error || undefined,
+        animate: true,
+      };
+
+      setMessages((prev) => [...prev, aiMsg]);
+    } catch (err) {
+      const errMsg = {
+        id: nextId++,
+        role: "ai",
+        time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        text: err instanceof Error ? err.message : "An error occurred",
+      };
+      setMessages((prev) => [...prev, errMsg]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  const resetToPlants = () => {
+    setSelectedPlant(null);
+    setSelectedDisease(null);
+    setMessages([]);
+    setDraft("");
+  };
+
+  const resetToDiseases = () => {
+    setSelectedDisease(null);
+    setMessages([]);
+    setDraft("");
+  };
 
   return (
     <PageTransition>
-      <Layout title={t.assistant.title} subtitle={lang === "ar" ? "تم الكشف في 24 فبراير • جلسة الذكاء الاصطناعي نشطة" : "Detected on Feb 24 • AI Session Active"}>
-        <div className="grid grid-cols-1 gap-6 2xl:grid-cols-12">
-          <div className="space-y-6 2xl:col-span-3">
-            <Card>
-              <h3 className="mb-4 text-xl font-black">Specimen Details</h3>
-              <div className="mb-3 flex items-center gap-2 text-sm">
-                <span className="rounded-full bg-tertiary-fixed px-2 py-1 text-[10px] font-bold uppercase text-on-tertiary-fixed-variant">Critical</span>
-                <span className="text-on-surface-variant">Alert Level</span>
+      <Layout title="Smart Plant Assistant" subtitle="Select a plant, choose a disease, then chat with the assistant.">
+        <AnimatePresence mode="wait">
+          {step === "plants" ? (
+            <motion.div
+              key="plants"
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -12 }}
+              transition={{ duration: 0.35, ease: "easeOut" }}
+              className="space-y-8"
+            >
+              <header>
+                <h2 className="text-3xl font-black tracking-tight">Select Specimen</h2>
+                <p className="mt-2 text-sm text-on-surface-variant">
+                  Choose the plant species you wish to analyze. Our models are tuned for these varieties.
+                </p>
+              </header>
+              <div className="grid grid-cols-2 gap-6 md:grid-cols-3 lg:grid-cols-4">
+                {plants.map((plant) => (
+                  <button
+                    key={plant.id}
+                    onClick={() => setSelectedPlant(plant.id)}
+                    className="group relative aspect-square overflow-hidden rounded-lg shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-lg focus:outline-none focus:ring-4 focus:ring-primary-container/50"
+                  >
+                    <img src={plant.image} alt={plant.name} className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110" />
+                    <div className="absolute inset-x-0 bottom-0 flex items-end justify-center bg-gradient-to-t from-black/80 via-black/40 to-transparent p-4 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
+                      <span className="text-sm font-bold text-white drop-shadow-md">{plant.name}</span>
+                    </div>
+                  </button>
+                ))}
               </div>
-              <div className="h-2 overflow-hidden rounded-full bg-surface-container-high dark:bg-slate-800">
-                <div className="h-full w-[85%] rounded-full bg-tertiary" />
-              </div>
-              <p className="mt-3 text-sm text-on-surface-variant">Confidence level: 94.2%</p>
-            </Card>
-            <Card>
-              <img src={imageUrls.greenhouse} alt="zone" className="h-44 w-full rounded-2xl object-cover" />
-              <p className="mt-3 text-lg font-bold">Climate Overview</p>
-            </Card>
-          </div>
+            </motion.div>
+          ) : null}
 
-          <div className="2xl:col-span-9">
-            <div className="mb-6 max-h-[62vh] space-y-6 overflow-y-auto rounded-3xl bg-surface-container-low p-6 hide-scrollbar dark:bg-slate-900">
-              <div className="flex justify-center">
-                <span className="rounded-full bg-surface-container px-3 py-1 text-xs font-bold uppercase tracking-wider text-outline dark:bg-slate-800">Today</span>
+          {step === "diseases" ? (
+            <motion.div
+              key="diseases"
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -12 }}
+              transition={{ duration: 0.35, ease: "easeOut" }}
+              className="space-y-8"
+            >
+              <div className="flex flex-wrap items-center gap-3 text-sm">
+                <button
+                  onClick={resetToPlants}
+                  className="rounded-full border border-outline-variant/50 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-on-surface-variant transition hover:border-primary hover:text-primary"
+                >
+                  Change plant
+                </button>
+                <span className="text-on-surface-variant">Selected: {selectedPlantLabel}</span>
               </div>
+
+              <div className="overflow-hidden rounded-2xl border border-outline-variant bg-surface-container shadow-sm">
+                <div className="relative h-52 w-full">
+                  <img src={selectedPlantImage} alt={selectedPlantLabel} className="h-full w-full object-cover" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-surface-container-highest to-transparent mix-blend-multiply" />
+                  <div className="absolute bottom-6 left-6 rounded-2xl border border-white/20 bg-white/40 p-4 backdrop-blur-md">
+                    <p className="text-xs font-bold uppercase tracking-widest text-on-surface-variant">Target Specimen</p>
+                    <h2 className="text-3xl font-black text-on-surface">{selectedPlantLabel}</h2>
+                  </div>
+                </div>
+                <div className="border-t border-outline-variant/30 bg-surface-container p-6">
+                  <h3 className="text-lg font-bold">Select Disease for Analysis</h3>
+                  <p className="mt-1 text-sm text-on-surface-variant">Choose the suspected condition to open a chat session.</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {diseaseList.map((disease) => (
+                  <button
+                    key={disease.id}
+                    onClick={() => setSelectedDisease(disease.id)}
+                    className="group rounded-2xl border-l-[8px] border-tertiary bg-surface-container p-6 text-left shadow-sm transition hover:bg-surface-container-high"
+                  >
+                    <div className="mb-4 flex items-start justify-between">
+                      <div className="rounded-full bg-tertiary-fixed p-3 text-on-tertiary-fixed">
+                        <span className="material-symbols-outlined">biotech</span>
+                      </div>
+                      <span className="material-symbols-outlined text-outline-variant transition-colors group-hover:text-primary">
+                        chevron_right
+                      </span>
+                    </div>
+                    <h4 className="text-lg font-bold text-on-surface transition-colors group-hover:text-primary">{disease.name}</h4>
+                    <p className="mt-2 text-sm text-on-surface-variant">Open the assistant for guidance on this condition.</p>
+                  </button>
+                ))}
+              </div>
+            </motion.div>
+          ) : null}
+
+          {step === "chat" ? (
+            <motion.div
+              key="chat"
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -12 }}
+              transition={{ duration: 0.35, ease: "easeOut" }}
+              className="flex h-[calc(100vh-220px)] flex-col"
+            >
+            <div className="mb-4 flex flex-wrap items-center gap-3 text-sm">
+              <button
+                onClick={resetToDiseases}
+                className="rounded-full border border-outline-variant/50 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-on-surface-variant transition hover:border-primary hover:text-primary"
+              >
+                Change disease
+              </button>
+              <button
+                onClick={resetToPlants}
+                className="rounded-full border border-outline-variant/50 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-on-surface-variant transition hover:border-primary hover:text-primary"
+              >
+                Change plant
+              </button>
+              <span className="text-on-surface-variant">{selectedPlantLabel} • {selectedDiseaseLabel}</span>
+            </div>
+
+            <div className="flex items-center justify-between border-b border-surface-variant bg-surface/80 px-6 py-4 backdrop-blur-md">
+              <div className="flex items-center gap-3">
+                <span className="material-symbols-outlined text-primary" style={{ fontVariationSettings: "'FILL' 1" }}>
+                  psychology
+                </span>
+                <h2 className="text-lg font-black">Assistant - {selectedDiseaseLabel} ({selectedPlantLabel})</h2>
+              </div>
+              <button className="text-outline transition hover:text-primary">
+                <span className="material-symbols-outlined">more_vert</span>
+              </button>
+            </div>
+
+            <div ref={scrollRef} className="flex-1 space-y-6 overflow-y-auto bg-surface-container-low p-6 hide-scrollbar">
               {messages.map((message) => (
                 <ChatBubble key={message.id} message={message} />
               ))}
-              {messages.length === 0 ? (
-                <div className="flex min-h-[340px] items-center justify-center">
-                  <div className="text-center">
-                    <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-primary">
-                      <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>
-                        smart_toy
-                      </span>
-                    </div>
-                    <p className="text-xl font-bold text-on-surface">Start a new conversation</p>
-                    <p className="mt-2 text-sm text-on-surface-variant">Upload an image or ask your first question to begin diagnosis assistance.</p>
-                  </div>
-                </div>
-              ) : null}
+              {loading && <TypingIndicator />}
             </div>
 
-            <div className="glass rounded-2xl border border-outline-variant/30 p-2 shadow-soft dark:border-slate-700">
-              <div className="flex items-end gap-2">
-                <button className="p-3 text-outline transition hover:text-primary">
-                  <span className="material-symbols-outlined">attach_file</span>
-                </button>
-                <textarea
-                  rows={1}
+            <div className="border-t border-surface-variant bg-surface p-4">
+              <div className="relative flex items-center">
+                <input
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
-                  placeholder={t.assistant.placeholder}
-                  className="max-h-40 min-h-[44px] flex-1 resize-none bg-transparent px-2 py-3 outline-none"
+                  onKeyDown={handleKeyDown}
+                  placeholder={`Ask about ${selectedDiseaseLabel}...`}
+                  className="w-full rounded-full border border-outline-variant/40 bg-surface-container px-5 py-3 text-sm outline-none focus:ring-2 focus:ring-primary"
                 />
-                <button className="p-3 text-outline transition hover:text-primary">
-                  <span className="material-symbols-outlined">mic</span>
-                </button>
-                <button className="rounded-xl bg-primary p-3 text-white shadow-lg transition hover:scale-105">
+                <button
+                  onClick={handleSend}
+                  disabled={loading || !draft.trim()}
+                  className="absolute right-2 rounded-full bg-primary p-2 text-white shadow-sm transition hover:bg-primary-container disabled:opacity-50"
+                >
                   <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>
                     send
                   </span>
                 </button>
               </div>
+              <p className="mt-3 text-center text-xs text-outline">Botanical AI can make mistakes. Verify important agricultural advice.</p>
             </div>
-          </div>
-        </div>
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
       </Layout>
     </PageTransition>
   );
